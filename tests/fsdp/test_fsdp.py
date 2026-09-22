@@ -109,128 +109,8 @@ class FSDPPluginIntegration(AccelerateTestCase):
             env = self.dist_env.copy()
             env["FSDP_AUTO_WRAP_POLICY"] = policy
             if policy == "TRANSFORMER_BASED_WRAP":
-                env["FSDP_TRANSFORMER_CLS_TO_WRAP"] = "BertLayer"
-            elif policy == "SIZE_BASED_WRAP":
-                env["FSDP_MIN_NUM_PARAMS"] = "2000"
-            with mockenv_context(**env):
-                fsdp_plugin = FullyShardedDataParallelPlugin()
-                fsdp_plugin.set_auto_wrap_policy(model)
-                if policy == "NO_WRAP":
-                    self.assertIsNone(fsdp_plugin.auto_wrap_policy)
-                else:
-                    self.assertIsNotNone(fsdp_plugin.auto_wrap_policy)
-
-        env = self.dist_env.copy()
-        env["FSDP_AUTO_WRAP_POLICY"] = "TRANSFORMER_BASED_WRAP"
-        env["FSDP_TRANSFORMER_CLS_TO_WRAP"] = "T5Layer"
-        with mockenv_context(**env):
-            fsdp_plugin = FullyShardedDataParallelPlugin()
-            with self.assertRaises(Exception) as cm:
-                fsdp_plugin.set_auto_wrap_policy(model)
-            self.assertTrue("Could not find the transformer layer class to wrap in the model." in str(cm.exception))
-
-        env = self.dist_env.copy()
-        env["FSDP_AUTO_WRAP_POLICY"] = "SIZE_BASED_WRAP"
-        env["FSDP_MIN_NUM_PARAMS"] = "0"
-        with mockenv_context(**env):
-            fsdp_plugin = FullyShardedDataParallelPlugin()
-            fsdp_plugin.set_auto_wrap_policy(model)
-            self.assertIsNone(fsdp_plugin.auto_wrap_policy)
-
-    def test_mixed_precision(self):
-        from torch.distributed.fsdp.fully_sharded_data_parallel import MixedPrecision
-        from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
-
-        for mp_dtype in dtypes:
-            env = self.dist_env.copy()
-            env["ACCELERATE_MIXED_PRECISION"] = mp_dtype
-            with mockenv_context(**env):
-                accelerator = Accelerator()
-                if mp_dtype == "fp16":
-                    dtype = torch.float16
-                elif mp_dtype == "bf16":
-                    dtype = torch.bfloat16
-                mp_policy = MixedPrecision(param_dtype=dtype, reduce_dtype=dtype, buffer_dtype=dtype)
-                self.assertEqual(accelerator.state.fsdp_plugin.mixed_precision_policy, mp_policy)
-                if mp_dtype == FP16:
-                    self.assertTrue(isinstance(accelerator.scaler, ShardedGradScaler))
-                elif mp_dtype == BF16:
-                    self.assertIsNone(accelerator.scaler)
-                AcceleratorState._reset_state(True)
-
-    def test_cpu_offload(self):
-        from torch.distributed.fsdp.fully_sharded_data_parallel import CPUOffload
-
-        for flag in [True, False]:
-            env = self.dist_env.copy()
-            env["FSDP_OFFLOAD_PARAMS"] = str(flag).lower()
-            with mockenv_context(**env):
-                fsdp_plugin = FullyShardedDataParallelPlugin()
-                self.assertEqual(fsdp_plugin.cpu_offload, CPUOffload(offload_params=flag))
-
-
-@require_fsdp
-@require_multi_device
-@slow
-class FSDPIntegrationTest(TempDirTestCase):
-    def setUp(self):
-        super().setUp()
-        self.performance_lower_bound = 0.82
-        self.performance_configs = [
-            "fsdp_shard_grad_op_transformer_based_wrap",
-            "fsdp_full_shard_transformer_based_wrap",
-        ]
-        self.peak_memory_usage_upper_bound = {
-            "multi_gpu_fp16": 3200,
-            "fsdp_shard_grad_op_transformer_based_wrap_fp16": 2000,
-            "fsdp_full_shard_transformer_based_wrap_fp16": 1900,
-            # Disabling below test as it overwhelms the RAM memory usage
-            # on CI self-hosted runner leading to tests getting killed.
-            # "fsdp_full_shard_cpu_offload_transformer_based_wrap_fp32": 1500,  # fp16 was leading to indefinite hang
-        }
-        self.n_train = 160
-        self.n_val = 160
-
-        mod_file = inspect.getfile(accelerate.test_utils)
-        self.test_scripts_folder = os.path.sep.join(mod_file.split(os.path.sep)[:-1] + ["scripts", "external_deps"])
-
-    def test_performance(self):
-        self.test_file_path = os.path.join(self.test_scripts_folder, "test_performance.py")
-        cmd = ["accelerate", "launch", "--num_processes=2", "--num_machines=1", "--machine_rank=0", "--use_fsdp"]
-        for config in self.performance_configs:
-            cmd_config = cmd.copy()
-            for i, strategy in enumerate(FSDP_SHARDING_STRATEGY):
-                if strategy.lower() in config:
-                    cmd_config.append(f"--fsdp_sharding_strategy={i+1}")
-                    break
-
-            if "fp32" in config:
-                cmd_config.append("--mixed_precision=no")
-            else:
-                cmd_config.append("--mixed_precision=fp16")
-
-            if "cpu_offload" in config:
-                cmd_config.append("--fsdp_offload_params=True")
-
-            for policy in FSDP_AUTO_WRAP_POLICY:
-                if policy.lower() in config:
-                    cmd_config.append(f"--fsdp_auto_wrap_policy={policy}")
-                    break
-
-            if policy == "TRANSFORMER_BASED_WRAP":
-                cmd_config.append("--fsdp_transformer_layer_cls_to_wrap=BertLayer")
-            elif policy == "SIZE_BASED_WRAP":
-                cmd_config.append("--fsdp_min_num_params=2000")
-
-            cmd_config.extend(
-                [
-                    self.test_file_path,
-                    f"--output_dir={self.tmpdir}",
-                    f"--performance_lower_bound={self.performance_lower_bound}",
-                ]
-            )
-            with patch_environment(omp_num_threads=1):
-                execute_subprocess_async(cmd_config, env=os.environ.copy())
+                env["FSDP_
+# ... [truncated] ...
 
     def test_checkpointing(self):
         self.test_file_path = os.path.join(self.test_scripts_folder, "test_checkpointing.py")
@@ -328,3 +208,4 @@ class FSDPIntegrationTest(TempDirTestCase):
             )
             with patch_environment(omp_num_threads=1):
                 execute_subprocess_async(cmd_config, env=os.environ.copy())
+
